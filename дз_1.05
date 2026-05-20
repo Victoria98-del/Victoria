@@ -1,0 +1,206 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import Ridge
+from sklearn.ensemble import IsolationForest
+from sklearn.cluster import KMeans
+from sklearn.decomposition import PCA
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import train_test_split
+import warnings
+warnings.filterwarnings('ignore')
+
+df = pd.read_csv("C:/Users/Vika/Downloads/AmesHousing (1).csv")
+
+# 1. ОЧИСТКА ДАННЫХ
+df_clean = df.copy()
+
+# Категориальные колонки с пропусками
+categorical_cols_with_na = ['Alley', 'Pool QC', 'Fence', 'Fireplace Qu', 
+                            'Garage Type', 'Garage Finish', 'Garage Qual', 
+                            'Garage Cond', 'Bsmt Qual', 'Bsmt Cond', 
+                            'Bsmt Exposure', 'BsmtFin Type 1', 'BsmtFin Type 2']
+
+for col in categorical_cols_with_na:
+    if col in df_clean.columns:
+        df_clean[col] = df_clean[col].fillna('None')
+
+# Числовые колонки с пропусками 
+numeric_cols_with_na_zero = ['Bsmt Full Bath', 'Bsmt Half Bath', 'Garage Cars', 
+                             'Garage Area', 'BsmtFin SF 1', 'BsmtFin SF 2', 
+                             'Bsmt Unf SF', 'Total Bsmt SF', 'Mas Vnr Area', 'Garage Yr Blt']
+
+for col in numeric_cols_with_na_zero:
+    if col in df_clean.columns:
+        df_clean[col] = df_clean[col].fillna(0)
+
+# Lot Frontage - медиана по Neighborhood
+df_clean['Lot Frontage'] = df_clean.groupby('Neighborhood')['Lot Frontage'].transform(
+    lambda x: x.fillna(x.median())
+)
+
+# Остальные числовые - медианой
+numeric_cols = df_clean.select_dtypes(include=[np.number]).columns
+for col in numeric_cols:
+    if df_clean[col].isnull().sum() > 0:
+        df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+
+# 2. ONE-HOT ENCODING
+categorical_cols = df_clean.select_dtypes(include=['object']).columns.tolist()
+if 'SalePrice' in categorical_cols:
+    categorical_cols.remove('SalePrice')
+
+df_encoded = pd.get_dummies(df_clean, columns=categorical_cols, drop_first=False)
+
+X = df_encoded.drop('SalePrice', axis=1)
+y = df_encoded['SalePrice']
+
+# 3. RIDGE РЕГРЕССИЯ - ТОП-10 ПРИЗНАКОВ
+numeric_features = X.select_dtypes(include=[np.number]).columns
+scaler = StandardScaler()
+X_scaled = X.copy()
+X_scaled[numeric_features] = scaler.fit_transform(X[numeric_features])
+
+X_train, X_test, y_train, y_test = train_test_split(X_scaled, y, test_size=0.2, random_state=42)
+
+ridge = Ridge(alpha=1.0)
+ridge.fit(X_train, y_train)
+
+feature_importance = pd.DataFrame({
+    'feature': X.columns,
+    'coefficient': ridge.coef_
+})
+feature_importance['abs_coef'] = np.abs(feature_importance['coefficient'])
+top_10 = feature_importance.nlargest(10, 'abs_coef')
+
+print("ТОП-10 САМЫХ ВАЖНЫХ ПРИЗНАКОВ (RIDGE РЕГРЕССИЯ)")
+for i, row in top_10.iterrows():
+    print(f"{row['feature']:45s} | Коэффициент: {row['coefficient']:10.2f}")
+
+# 4. ВИЗУАЛИЗАЦИЯ: ЗАВИСИМОСТЬ ЦЕНЫ ОТ ЖИЛОЙ ПЛОЩАДИ
+plt.figure(figsize=(12, 6))
+plt.scatter(df_clean['Gr Liv Area'], df_clean['SalePrice'], alpha=0.5, s=30, c='steelblue')
+plt.xlabel('Жилая площадь (кв. футы)', fontsize=14)
+plt.ylabel('Цена продажи ($)', fontsize=14)
+plt.title('Зависимость цены от жилой площади', fontsize=16, fontweight='bold')
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.show()
+
+# 5. ВЫЯВЛЕНИЕ АНОМАЛИЙ (Isolation Forest)
+features_for_anomaly = ['Gr Liv Area', 'SalePrice', 'Total Bsmt SF', 
+                         'Garage Area', 'Lot Area', 'Overall Qual']
+
+X_anomaly = df_clean[features_for_anomaly].copy()
+iso_forest = IsolationForest(contamination=0.05, random_state=42)
+df_clean['anomaly'] = iso_forest.fit_predict(X_anomaly)
+
+anomalies = df_clean[df_clean['anomaly'] == -1]
+normal = df_clean[df_clean['anomaly'] == 1]
+
+print("ВЫЯВЛЕНИЕ АНОМАЛИЙ")
+print(f"Нормальных объектов: {len(normal)}")
+print(f"Аномальных объектов: {len(anomalies)} ({len(anomalies)/len(df_clean)*100:.2f}%)")
+
+# 6. СРАВНЕНИЕ РЕГРЕССИИ ДО И ПОСЛЕ УДАЛЕНИЯ АНОМАЛИЙ
+def evaluate_model(X_data, y_data):
+    X_train, X_test, y_train, y_test = train_test_split(X_data, y_data, test_size=0.2, random_state=42)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
+    ridge = Ridge(alpha=1.0)
+    ridge.fit(X_train_scaled, y_train)
+    y_pred = ridge.predict(X_test_scaled)
+    return r2_score(y_test, y_pred), np.sqrt(mean_squared_error(y_test, y_pred))
+
+# Все данные
+r2_all, rmse_all = evaluate_model(X, y)
+print(f"\nВсе данные (с аномалиями): R² = {r2_all:.4f}, RMSE = ${rmse_all:,.2f}")
+
+# Только нормальные данные
+df_normal_encoded = df_encoded[df_clean['anomaly'] == 1]
+X_normal = df_normal_encoded.drop('SalePrice', axis=1)
+y_normal = df_normal_encoded['SalePrice']
+r2_normal, rmse_normal = evaluate_model(X_normal, y_normal)
+print(f"Без аномалий:           R² = {r2_normal:.4f}, RMSE = ${rmse_normal:,.2f}")
+print(f"Сравние качества регрессии: R² +{(r2_normal - r2_all)*100:.2f}%, RMSE -{(1 - rmse_normal/rmse_all)*100:.2f}%")
+
+# 7. СЕГМЕНТАЦИЯ 
+cluster_features = ['Gr Liv Area', 'Total Bsmt SF', 'Garage Area', 'Lot Area', 
+                    'Overall Qual', 'Overall Cond', 'Year Built', 'Bedroom AbvGr',
+                    'Full Bath', 'TotRms AbvGrd']
+
+X_cluster = df_clean[cluster_features].copy()
+X_cluster_scaled = StandardScaler().fit_transform(X_cluster)
+
+kmeans = KMeans(n_clusters=4, random_state=42, n_init=10)
+df_clean['Segment'] = kmeans.fit_predict(X_cluster_scaled)
+
+print("СЕГМЕНТАЦИЯ ОБЪЕКТОВ")
+segment_stats = df_clean.groupby('Segment').agg({
+    'Gr Liv Area': 'mean',
+    'SalePrice': 'mean',
+    'Overall Qual': 'mean',
+    'Year Built': 'mean'
+}).round(2)
+#print(segment_stats)
+#print("\nРаспределение:", df_clean['Segment'].value_counts().sort_index().to_dict())
+
+# 8. PCA + РЕГРЕССИЯ
+numeric_cols_all = df_clean.select_dtypes(include=[np.number]).columns
+numeric_cols_all = [col for col in numeric_cols_all if col not in ['SalePrice', 'anomaly', 'Segment']]
+
+X_pca_data = df_clean[numeric_cols_all].copy()
+X_pca_scaled = StandardScaler().fit_transform(X_pca_data)
+
+pca = PCA(n_components=20)
+X_pca = pca.fit_transform(X_pca_scaled)
+
+X_train_pca, X_test_pca, y_train_pca, y_test_pca = train_test_split(X_pca, y, test_size=0.2, random_state=42)
+
+ridge_pca = Ridge(alpha=1.0)
+ridge_pca.fit(X_train_pca, y_train_pca)
+y_pred_pca = ridge_pca.predict(X_test_pca)
+
+print("PCA + РЕГРЕССИЯ")
+print(f"R² на PCA: {r2_score(y_test_pca, y_pred_pca):.4f}")
+print(f"RMSE на PCA: ${np.sqrt(mean_squared_error(y_test_pca, y_pred_pca)):,.2f}")
+
+# 9. ДИНАМИКА ЦЕН (кризис 2008 и сезонность)
+yearly_prices = df_clean.groupby('Yr Sold')['SalePrice'].mean()
+monthly_prices = df_clean.groupby('Mo Sold')['SalePrice'].mean()
+
+print("ДИНАМИКА ЦЕН")
+for year, price in yearly_prices.items():
+    print(f"{year}: ${price:,.2f}")
+
+# Падение в кризис 2008
+if 2007 in yearly_prices and 2008 in yearly_prices:
+    drop_2008 = (yearly_prices[2008] - yearly_prices[2007]) / yearly_prices[2007] * 100
+    print(f"\nПадение цен в 2008: {drop_2008:.2f}%")
+
+print("СЕЗОННОСТЬ ПРОДАЖ")
+months_names = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек']
+for month in range(1, 13):
+    price = monthly_prices[month] if month in monthly_prices else 0
+    print(f"{months_names[month-1]}: ${price:,.2f}")
+
+max_month = monthly_prices.idxmax()
+min_month = monthly_prices.idxmin()
+print(f"\nСамый дорогой месяц: {months_names[max_month-1]} (${monthly_prices[max_month]:,.2f})")
+print(f"Самый дешевый месяц: {months_names[min_month-1]} (${monthly_prices[min_month]:,.2f})")
+print(f"Разница: {((monthly_prices[max_month]/monthly_prices[min_month])-1)*100:.1f}%")
+
+# 10. ВОЗРАСТ ДОМА И СКОЛЬКО ЛЕТ С РЕМОНТА
+df_clean['Age_at_sale'] = df_clean['Yr Sold'] - df_clean['Year Built']
+df_clean['Years_since_remod'] = df_clean['Yr Sold'] - df_clean['Year Remod/Add']
+
+corr_age = df_clean['Age_at_sale'].corr(df_clean['SalePrice'])
+corr_remod = df_clean['Years_since_remod'].corr(df_clean['SalePrice'])
+
+print("ВОЗРАСТ ДОМА И РЕМОНТ")
+print(f"Корреляция возраста дома с ценой: {corr_age:.4f}")
+print(f"Корреляция лет после ремонта с ценой: {corr_remod:.4f}")
