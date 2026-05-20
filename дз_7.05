@@ -31,13 +31,13 @@ class GeneticAlgorithmTSP:
                  tournament_size=3):
         """
         Параметры:
-        - dist_matrix: матрица расстояний между городами
-        - pop_size: размер популяции
-        - generations: количество поколений
-        - mutation_rate: вероятность мутации
-        - crossover_rate: вероятность скрещивания
-        - elite_size: количество элитных особей
-        - tournament_size: размер турнира для селекции
+        dist_matrix: матрица расстояний между городами
+         pop_size: размер популяции
+         generations: количество поколений
+         mutation_rate: вероятность мутации
+         crossover_rate: вероятность скрещивания
+         elite_size: количество элитных особей
+         tournament_size: размер турнира для селекции
         """
         self.dist_matrix = dist_matrix
         self.n_cities = len(dist_matrix)
@@ -182,8 +182,6 @@ class GeneticAlgorithmTSP:
             print(f"Лучшая найденная длина: {self.best_length:.2f}")
         
         return self.best_route, self.best_length
-
-# ДЕМОНСТРАЦИЯ
 
 if __name__ == "__main__":
     # Параметры задачи
