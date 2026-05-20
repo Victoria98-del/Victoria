@@ -1,0 +1,211 @@
+import random
+import math
+
+def generate_cities(n_cities, seed=42):
+    #Генерирует случайные координаты городов
+    random.seed(seed)
+    cities = []
+    for i in range(n_cities):
+        x = random.uniform(0, 100)
+        y = random.uniform(0, 100)
+        cities.append((x, y))
+    return cities
+
+def distance(city1, city2):
+    return math.sqrt((city1[0] - city2[0])**2 + (city1[1] - city2[1])**2)
+
+def compute_distance_matrix(cities):
+    #матрица расстояний между всеми городами
+    n = len(cities)
+    dist_matrix = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1, n):
+            d = distance(cities[i], cities[j])
+            dist_matrix[i][j] = d
+            dist_matrix[j][i] = d
+    return dist_matrix
+
+class GeneticAlgorithmTSP:
+    def __init__(self, dist_matrix, pop_size=100, generations=500,
+                 mutation_rate=0.02, crossover_rate=0.9, elite_size=5,
+                 tournament_size=3):
+        """
+        Параметры:
+        - dist_matrix: матрица расстояний между городами
+        - pop_size: размер популяции
+        - generations: количество поколений
+        - mutation_rate: вероятность мутации
+        - crossover_rate: вероятность скрещивания
+        - elite_size: количество элитных особей
+        - tournament_size: размер турнира для селекции
+        """
+        self.dist_matrix = dist_matrix
+        self.n_cities = len(dist_matrix)
+        self.pop_size = pop_size
+        self.generations = generations
+        self.mutation_rate = mutation_rate
+        self.crossover_rate = crossover_rate
+        self.elite_size = elite_size
+        self.tournament_size = tournament_size
+        
+        # Лучшее найденное решение
+        self.best_route = None
+        self.best_length = float('inf')
+        self.best_history = []  # История улучшений
+        
+    def route_length(self, route):
+        #длина маршрута
+        length = 0
+        for i in range(self.n_cities - 1):
+            length += self.dist_matrix[route[i]][route[i + 1]]
+        # Возврат в начальный город
+        length += self.dist_matrix[route[-1]][route[0]]
+        return length
+    
+    def create_individual(self):
+        individual = list(range(self.n_cities))
+        random.shuffle(individual)
+        return individual
+    
+    def initialize_population(self):
+        population = []
+        for _ in range(self.pop_size):
+            population.append(self.create_individual())
+        return population
+    
+    def tournament_selection(self, population, fitnesses):
+# выбор лучшего
+        best_idx = random.randint(0, self.pop_size - 1)
+        for _ in range(self.tournament_size - 1):
+            candidate_idx = random.randint(0, self.pop_size - 1)
+            if fitnesses[candidate_idx] < fitnesses[best_idx]:  # Меньше = лучше
+                best_idx = candidate_idx
+        return population[best_idx].copy()
+    
+    def ordered_crossover(self, parent1, parent2):
+        size = len(parent1)
+        
+        # Выбираем две точки разреза
+        start, end = sorted(random.sample(range(size), 2))
+        child = [-1] * size
+        
+        # Копируем сегмент из первого родителя
+        for i in range(start, end + 1):
+            child[i] = parent1[i]
+        
+        # Заполняем оставшиеся позиции из второго родителя
+        current_pos = 0
+        for i in range(size):
+            if child[i] == -1:
+                while parent2[current_pos] in child:
+                    current_pos += 1
+                child[i] = parent2[current_pos]
+                current_pos += 1
+        
+        return child
+    
+    def mutate(self, route):
+        if random.random() < self.mutation_rate:
+            i, j = random.sample(range(self.n_cities), 2)
+            route[i], route[j] = route[j], route[i]
+        return route
+    
+    def evaluate_population(self, population):
+        return [self.route_length(ind) for ind in population]
+    
+    def get_elites(self, population, fitnesses):
+        sorted_indices = sorted(range(len(fitnesses)), key=lambda i: fitnesses[i])
+        elites = [population[i].copy() for i in sorted_indices[:self.elite_size]]
+        return elites
+    
+    def update_best(self, population, fitnesses):
+        #Обновляет глобальное лучшее решение
+        min_idx = fitnesses.index(min(fitnesses))
+        if fitnesses[min_idx] < self.best_length:
+            self.best_length = fitnesses[min_idx]
+            self.best_route = population[min_idx].copy()
+            self.best_history.append((len(self.best_history), self.best_length))
+            return True
+        return False
+    
+    def solve(self, verbose=True):
+        #Запуск генетического алгоритма
+    
+        population = self.initialize_population()
+        fitnesses = self.evaluate_population(population)
+        self.update_best(population, fitnesses)
+        
+        if verbose:
+            print(f"Начальная популяция: лучший маршрут = {self.best_length:.2f}")
+        
+        # Основной цикл
+        for generation in range(self.generations):
+            new_population = []
+            
+            elites = self.get_elites(population, fitnesses)
+            new_population.extend(elites)
+            
+            while len(new_population) < self.pop_size:
+                # Селекция родителей
+                parent1 = self.tournament_selection(population, fitnesses)
+                parent2 = self.tournament_selection(population, fitnesses)
+                
+                if random.random() < self.crossover_rate:
+                    child1 = self.ordered_crossover(parent1, parent2)
+                    child2 = self.ordered_crossover(parent2, parent1)
+                else:
+                    child1 = parent1.copy()
+                    child2 = parent2.copy()
+                
+                child1 = self.mutate(child1)
+                child2 = self.mutate(child2)
+                
+                new_population.append(child1)
+                if len(new_population) < self.pop_size:
+                    new_population.append(child2)
+            
+            population = new_population
+            
+            fitnesses = self.evaluate_population(population)
+            
+            # Обновление лучшего решения
+            improved = self.update_best(population, fitnesses)
+            
+            # Логирование
+            if verbose and (generation % 50 == 0 or generation == self.generations - 1):
+                avg_fitness = sum(fitnesses) / len(fitnesses)
+                print(f"Поколение {generation:4d}: "
+                      f"лучший = {self.best_length:8.2f}, "
+                      f"средний = {avg_fitness:8.2f}")
+        
+        if verbose:
+            print(f"Лучшая найденная длина: {self.best_length:.2f}")
+        
+        return self.best_route, self.best_length
+
+# ДЕМОНСТРАЦИЯ
+
+if __name__ == "__main__":
+    # Параметры задачи
+    NUM_CITIES = 25
+    RANDOM_SEED = 42
+    
+    # Генерация городов
+    cities = generate_cities(NUM_CITIES, seed=RANDOM_SEED)
+    dist_matrix = compute_distance_matrix(cities)
+    
+    # Запуск генетического алгоритма
+    ga = GeneticAlgorithmTSP(
+        dist_matrix=dist_matrix,
+        pop_size=150,
+        generations=500,
+        mutation_rate=0.02,
+        crossover_rate=0.9,
+        elite_size=5,
+        tournament_size=3
+    )
+    
+    best_route, best_length = ga.solve(verbose=False)
+    
+    # Вывод только длины маршрута
+    print(f"{best_length:.2f}")
