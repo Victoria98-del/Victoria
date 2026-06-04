@@ -1,0 +1,123 @@
+import random
+import matplotlib.pyplot as plt
+import numpy as np
+import math
+
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.cluster = None  
+
+def euclidean_distance(p1, p2):
+    return math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2)
+
+# Возвращает индексы всех точек в радиусе eps от данной
+def find_neighbors(point_idx, points, eps):
+    neighbors = []
+    for j, other_point in enumerate(points):
+        if point_idx != j and euclidean_distance(points[point_idx], other_point) <= eps:
+            neighbors.append(j)
+    return neighbors
+
+def dbscan(points, eps, min_samples):
+    cluster_id = 0
+    
+    for i in range(len(points)):
+        if points[i].cluster is not None:
+            continue
+            
+        neighbors = find_neighbors(i, points, eps)
+        
+        #  является ли точка ядром кластера
+        if len(neighbors) >= min_samples - 1:  
+            cluster_id += 1
+            points[i].cluster = cluster_id   
+            queue = neighbors
+            
+            while queue:
+                current_idx = queue.pop(0)
+                current_point = points[current_idx]
+                
+                if current_point.cluster == -1:
+                    current_point.cluster = cluster_id
+                
+                if current_point.cluster is None:
+                    current_point.cluster = cluster_id
+                    
+                    new_neighbors = find_neighbors(current_idx, points, eps)
+                    
+                    if len(new_neighbors) >= min_samples - 1:
+                        for neighbor_idx in new_neighbors:
+                            neighbor = points[neighbor_idx]
+                            if neighbor.cluster is None or neighbor.cluster == -1:
+                                if neighbor_idx not in queue:
+                                    queue.append(neighbor_idx)
+        else:
+            points[i].cluster = -1
+    
+    return points
+
+def generate_points(count_of_centers=3, points_per_center=10, noise_level=0.0):
+    points = []   
+
+    for _ in range(count_of_centers):
+        center_x = random.random()
+        center_y = random.random()
+        for _ in range(points_per_center):
+            x = random.gauss(center_x, sigma=0.05)
+            y = random.gauss(center_y, sigma=0.05)
+            points.append(Point(x, y))  
+   
+    if noise_level > 0:
+        noise_count = int(len(points) * noise_level)
+        for _ in range(noise_count):
+            x = random.random()
+            y = random.random()
+            points.append(Point(x, y))  
+    random.shuffle(points)
+    return points
+
+def plot_clusters(points, title="Кластеризация DBSCAN"):
+    pointXY = np.array([[p.x, p.y] for p in points])
+    labels = np.array([p.cluster for p in points]) 
+    plt.figure(figsize=(10, 8))  
+    unique_labels = set(labels)
+    colors = plt.cm.viridis(np.linspace(0, 1, len(unique_labels))) 
+    for k, col in zip(unique_labels, colors):
+        if k == -1:
+            col = 'black'  # Шум - черный
+            marker = 'o'    # Шум отмечаем крестиками
+            markersize = 8
+            label = 'Шум'
+        else:
+            marker = 'o'    # Кластеры - кружками
+            markersize = 8
+            label = f'Кластер {k}' 
+        mask = (labels == k)
+        xy = pointXY[mask]
+        plt.plot(xy[:, 0], xy[:, 1], marker, color=col, 
+                markersize=markersize, label=label, markeredgecolor='k')
+    
+    plt.title(title)
+    plt.xlabel('X координата')
+    plt.ylabel('Y координата')
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
+
+def main():
+    n_centers = 4
+    n_points = 15
+    eps = 0.1
+    min_samples = 5   
+    points = generate_points(
+        count_of_centers=n_centers, 
+        points_per_center=n_points,
+        noise_level=0.1
+    )
+    points = dbscan(points, eps=eps, min_samples=min_samples)  
+    plot_clusters(points, f"DBSCAN (eps={eps}, min_samples={min_samples})")
+if __name__ == '__main__':
+    main()
